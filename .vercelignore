@@ -1,0 +1,11 @@
+# В деплой уходит только dist/ — всё остальное нужно лишь для локальной сборки.
+node_modules
+src
+build.mjs
+qa.mjs
+package-lock.json
+README.md
+
+# Копии сборки рядом с исходниками (build.mjs пишет их для открытия двойным кликом)
+/index.html
+/assets

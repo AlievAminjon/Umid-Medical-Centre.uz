@@ -1,0 +1,10 @@
+node_modules
+
+# Вывод сборки рядом с исходниками — в репозитории не нужен
+/index.html
+/assets
+
+# Служебное
+.DS_Store
+Thumbs.db
+.vercel

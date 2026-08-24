@@ -1,0 +1,135 @@
+/* ============================================================
+   UMID SIGNATURE — Motion system
+   Каждая крупная секция получает свой сценарий появления.
+   Класс js-motion ставит скрипт: без JS контент виден сразу.
+   ============================================================ */
+
+/* ---------- Базовое состояние ---------- */
+.js-motion [data-reveal]{
+  --rd:0ms;                                  /* задержка внутри группы (ставит JS) */
+  opacity:0;
+  transition:opacity var(--d-4) var(--e-out) var(--rd),transform var(--d-4) var(--e-out) var(--rd),
+             clip-path var(--d-5) var(--e-out) var(--rd),filter var(--d-4) var(--e-out) var(--rd)
+}
+.js-motion [data-reveal].in{opacity:1;transform:none;filter:none;clip-path:inset(0 0 0 0)}
+
+/* ---------- Сценарии ---------- */
+.js-motion [data-reveal="up"],
+.js-motion [data-reveal=""]{transform:translateY(30px)}
+.js-motion [data-reveal="up-sm"]{transform:translateY(16px)}
+.js-motion [data-reveal="fade"]{transform:none}
+.js-motion [data-reveal="left"]{transform:translateX(-34px)}
+.js-motion [data-reveal="right"]{transform:translateX(34px)}
+.js-motion [data-reveal="scale"]{transform:scale(.955)}
+.js-motion [data-reveal="rise"]{transform:translateY(46px) scale(.97)}
+.js-motion [data-reveal="blur"]{filter:blur(9px);transform:translateY(18px)}
+.js-motion [data-reveal="clip"]{clip-path:inset(14% 0 100% 0);transform:scale(1.04)}
+.js-motion [data-reveal="clip-x"]{clip-path:inset(0 100% 0 0)}
+
+/* Линия, которая «чертится» */
+.js-motion [data-reveal="line"]{transform:scaleX(0);transform-origin:left}
+.js-motion [data-reveal="line"].in{transform:scaleX(1)}
+.js-motion [data-reveal="line-y"]{transform:scaleY(0);transform-origin:top}
+.js-motion [data-reveal="line-y"].in{transform:scaleY(1)}
+
+/* ---------- Text mask reveal ---------- */
+.mask{display:block;overflow:hidden;padding-bottom:.06em;margin-bottom:-.06em}
+.mask__i{display:block;transform-origin:left bottom}
+.js-motion .mask__i{
+  --rd:0ms;
+  transform:translateY(105%) rotate(2.2deg);opacity:.001;
+  transition:transform var(--d-5) var(--e-out) var(--rd),opacity var(--d-3) var(--e-out) var(--rd)
+}
+.js-motion [data-reveal].in .mask__i,.js-motion .mask.in .mask__i{transform:none;opacity:1}
+
+/* ---------- Изображение: clip + zoom ---------- */
+.reveal-img{overflow:hidden}
+.js-motion .reveal-img>img,.js-motion .reveal-img>.ph-inner{
+  transform:scale(1.14);transition:transform var(--d-5) var(--e-out) var(--rd)
+}
+.js-motion .in.reveal-img>img,.js-motion .in .reveal-img>img,
+.js-motion .in.reveal-img>.ph-inner,.js-motion .in .reveal-img>.ph-inner{transform:scale(1)}
+
+/* ---------- Параллакс (значения ставит JS) ----------
+   Сглаживанием занимается rAF-петля в motion.js, поэтому CSS-перехода
+   здесь нет: два сглаживания подряд дают ощущение «резинки». */
+.parallax{
+  --px:0;--py:0;--depth:1;
+  transform:translate3d(calc(var(--px) * var(--depth) * 1px),calc(var(--py) * var(--depth) * 1px),0)
+}
+/* Слой с лёгким доворотом — от него и появляется ощущение объёма */
+.parallax--tilt{
+  transform:
+    perspective(1400px)
+    translate3d(calc(var(--px) * var(--depth) * 1px),calc(var(--py) * var(--depth) * 1px),0)
+    rotateY(calc(var(--px) * .085deg))
+    rotateX(calc(var(--py) * -.085deg))
+}
+/* Композиционный слой поднимаем только пока сцена реально движется */
+.is-parallax-live .parallax{will-change:transform}
+.scroll-parallax{--sy:0}
+
+/* ---------- Мягкое «дыхание» плавающих карточек ---------- */
+@keyframes float-soft{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes float-soft-2{0%,100%{transform:translateY(0)}50%{transform:translateY(8px)}}
+@keyframes orbit-spin{to{transform:rotate(360deg)}}
+@keyframes glow-pulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:.85;transform:scale(1.06)}}
+@keyframes shimmer{0%{background-position:-180% 0}100%{background-position:180% 0}}
+@keyframes pop-in{0%{transform:scale(.5);opacity:0}62%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}
+@keyframes draw-line{to{stroke-dashoffset:0}}
+
+/* ---------- Page loader ---------- */
+.loader{
+  position:fixed;inset:0;z-index:4000;display:grid;place-items:center;
+  background:var(--white);
+  transition:opacity .55s var(--e-out),visibility .55s
+}
+.loader[data-done="true"]{opacity:0;visibility:hidden;pointer-events:none}
+.loader__inner{display:flex;flex-direction:column;align-items:center;gap:22px}
+.loader__mark{width:64px;height:auto;animation:loader-mark 1.5s var(--e-out) infinite alternate}
+@keyframes loader-mark{from{opacity:.5;transform:translateY(2px)}to{opacity:1;transform:translateY(-2px)}}
+.loader__line{position:relative;width:132px;height:2px;border-radius:2px;background:var(--sky-100);overflow:hidden}
+.loader__line::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;
+  background:linear-gradient(90deg,transparent,var(--navy),var(--blue-400),transparent);
+  transform:translateX(-100%);animation:loader-run 1.15s var(--e-in-out) infinite
+}
+@keyframes loader-run{to{transform:translateX(100%)}}
+.loader__word{font-family:var(--font-display);font-size:.7rem;letter-spacing:.34em;text-transform:uppercase;color:var(--muted-2)}
+
+/* ---------- Page transition ---------- */
+#view{animation:page-in .62s var(--e-out) both}
+@keyframes page-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+body.is-leaving #view{opacity:0;transform:translateY(-10px);transition:opacity .22s var(--e-soft),transform .22s var(--e-soft)}
+
+/* Там, где браузер умеет View Transitions, переход между страницами
+   становится мягким перекрытием: fade + лёгкий сдвиг. */
+@media (prefers-reduced-motion:no-preference){
+  ::view-transition-old(root){animation:vt-out .26s var(--e-soft) both}
+  ::view-transition-new(root){animation:vt-in .5s var(--e-out) both}
+}
+@keyframes vt-out{to{opacity:0;transform:translateY(-10px)}}
+@keyframes vt-in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+/* ---------- Scroll progress ---------- */
+.progress{
+  position:fixed;left:0;top:0;height:2px;z-index:1200;width:100%;transform-origin:left;transform:scaleX(var(--p,0));
+  background:linear-gradient(90deg,var(--navy),var(--blue-400));pointer-events:none;opacity:0;transition:opacity var(--d-2)
+}
+body.is-scrolled .progress{opacity:1}
+
+/* ============================================================
+   Reduced motion — сайт остаётся полностью рабочим
+   ============================================================ */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important
+  }
+  .js-motion [data-reveal]{opacity:1!important;transform:none!important;filter:none!important;clip-path:none!important}
+  .js-motion .mask__i{transform:none!important;opacity:1!important}
+  .js-motion .reveal-img>img,.js-motion .reveal-img>.ph-inner{transform:none!important}
+  .parallax{transform:none!important}
+  #view{animation:none}
+  .loader{display:none}
+}
