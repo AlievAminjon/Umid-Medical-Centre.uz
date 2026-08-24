@@ -1090,42 +1090,45 @@ body.menu-open .bottombar{transform:translateY(110%)}
 .vthumb.is-swapping .vthumb__play{opacity:.4}
 
 /* ---------------- Плавающие карточки ---------------- */
-.hero__float{position:absolute;z-index:4;max-width:242px}
+/* Карточки живут отдельным слоем .hero__floats поверх кадра, поэтому
+   overflow:hidden у .vplayer__frame их не режет. Раньше они выносились
+   за край кадра (left:-6%), и «обрезанными» выглядели не из-за clipping:
+   белое стекло на светлом фоне первого экрана просто пропадало, читалась
+   только часть, лежащая на тёмном видео. Держим карточки внутри кадра
+   с запасом на параллакс (±14px) и на «дыхание» анимации (±10px). */
+.hero__floats{--float-x:clamp(22px,5%,48px);--float-y:clamp(22px,5%,48px)}
+.hero__float{position:absolute;z-index:4;width:min(242px,58%)}
 .hero__float-in{
   display:flex;align-items:center;gap:13px;
   padding:15px 19px;border-radius:var(--r-lg);
-  background:rgba(255,255,255,.86);
+  background:rgba(255,255,255,.92);
   -webkit-backdrop-filter:blur(22px) saturate(170%);backdrop-filter:blur(22px) saturate(170%);
-  border:1px solid rgba(255,255,255,.92);box-shadow:var(--sh-lg)
+  /* Хайрлайн-кольцо: карточка остаётся карточкой на любой подложке,
+     а не только на тёмном кадре видео. */
+  border:1px solid rgba(255,255,255,.92);
+  box-shadow:0 0 0 1px rgba(12,42,86,.07),var(--sh-lg)
 }
 .hero__float b{display:block;font-family:var(--font-display);font-size:1rem;color:var(--ink);letter-spacing:-.028em;line-height:1.2}
 .hero__float span{display:block;font-size:.77rem;color:var(--muted);line-height:1.4;margin-top:3px}
 .hero__float .icon-tile{width:40px;height:40px;border-radius:13px}
 .hero__float .icon-tile svg{width:19px;height:19px}
 /* «Дыхание» живёт на внутреннем элементе — снаружи трансформ занят параллаксом */
-.hero__float--a{top:8%;left:-6%}
+.hero__float--a{top:var(--float-y);left:var(--float-x)}
 .hero__float--a .hero__float-in{animation:float-soft 8s var(--e-in-out) infinite}
-.hero__float--b{top:45%;right:-4%}
+.hero__float--b{top:44%;right:var(--float-x)}
 .hero__float--b .hero__float-in{animation:float-soft-2 9.5s var(--e-in-out) infinite}
-.hero__float--c{bottom:6%;left:-4%}
+.hero__float--c{bottom:var(--float-y);left:var(--float-x)}
 .hero__float--c .hero__float-in{animation:float-soft 10.5s var(--e-in-out) infinite .6s}
+/* Кадр ниже и уже — карточки прижимаются плотнее, но остаются внутри него */
 @media (max-width:1279px){
-  .hero__float--a{left:-2%}
-  .hero__float--b{right:-1%}
-  .hero__float--c{left:0}
-}
-/* Одна колонка, но карточки ещё плавают: держим их внутри кадра,
-   иначе на планшете они вылезают за поле контейнера. */
-@media (min-width:768px) and (max-width:1023px){
-  .hero__float--a{left:3%}
-  .hero__float--b{right:3%}
-  .hero__float--c{left:3%}
+  .hero__floats{--float-x:clamp(18px,4%,34px);--float-y:clamp(18px,4%,34px)}
+  .hero__float{width:min(226px,56%)}
 }
 /* На узких экранах карточки становятся списком под видео */
 @media (max-width:767px){
   .hero__media{max-width:none}
   .hero__floats{display:grid;gap:10px;margin-top:16px}
-  .hero__float{position:static;max-width:none}
+  .hero__float{position:static;width:auto}
   .hero__float-in{animation:none!important;box-shadow:var(--sh-sm);background:#fff;border-color:var(--line);padding:13px 16px}
 }
 
