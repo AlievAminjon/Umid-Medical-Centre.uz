@@ -5,7 +5,7 @@
    «Удобная запись» на главной — различаются только id полей.
    ============================================================ */
 import { icon } from '../lib/icons.js';
-import { esc, t, href, waLink, safeSet } from '../lib/core.js';
+import { esc, t, href, waLink } from '../lib/core.js';
 import { CLINIC, SERVICES } from '../data/clinic.js';
 import { btn } from './ui.js';
 
@@ -66,6 +66,12 @@ export function bookingFields(preselect = '', o = {}) {
         </div>
       </div>
 
+      <!-- Ловушка для ботов: человек это поле не видит и не заполняет -->
+      <div class="hp" aria-hidden="true">
+        <label for="${p}-website">Website</label>
+        <input id="${p}-website" name="website" type="text" tabindex="-1" autocomplete="off">
+      </div>
+
       <div class="field mt-3" data-consent>
         <label class="consent">
           <input type="checkbox" name="consent" id="${p}-consent">
@@ -116,26 +122,38 @@ export function validate(form) {
   return ok;
 }
 
-/* ---------- Отправка ---------- */
+/* ---------- Отправка ----------
+   Заявка уходит на CLINIC.bookingEndpoint (Vercel-функция api/booking.js,
+   она пересылает её в Telegram клиники). Персональные данные в браузере
+   не сохраняются.
+   Возвращает { delivered }: false — функция не настроена (503), недоступна
+   или ответила ошибкой. Тогда показывается демо-сценарий: экран успеха
+   с просьбой продублировать заявку в Telegram/WhatsApp. */
+const SUBMIT_TIMEOUT = 12000;
+
 export async function submitBooking(data) {
-  if (CLINIC.bookingEndpoint) {
-    const res = await fetch(CLINIC.bookingEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    if (!res.ok) throw new Error('Request failed: ' + res.status);
-    return true;
+  const endpoint = CLINIC.bookingEndpoint;
+  /* С диска (file://) серверной функции нет — сразу демо-сценарий */
+  const canSend = endpoint && typeof fetch === 'function' && /^https?:$/.test(window.location.protocol);
+  if (!canSend) {
+    await new Promise((r) => setTimeout(r, 500));
+    return { delivered: false };
   }
-  /* Демо-режим: пока CRM не подключена, заявка сохраняется локально,
-     а пациенту предлагается продублировать её в мессенджер. */
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), SUBMIT_TIMEOUT) : null;
   try {
-    const list = JSON.parse(localStorage.getItem('umid.requests') || '[]');
-    list.push({ ...data, at: new Date().toISOString() });
-    safeSet('umid.requests', JSON.stringify(list));
-  } catch { /* приватный режим — просто пропускаем */ }
-  await new Promise((r) => setTimeout(r, 700));
-  return true;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(data),
+      signal: ctrl ? ctrl.signal : undefined
+    });
+    return { delivered: res.ok, status: res.status };
+  } catch (err) {
+    return { delivered: false, error: err };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /* ---------- Экран успеха ---------- */
@@ -174,6 +192,6 @@ export function successView(data, o = {}) {
       </div>
     </div>
     ${closeBtn}
-    ${CLINIC.bookingEndpoint ? '' : `<p class="small muted" style="font-size:.76rem">${esc(t('booking.demoNote'))}</p>`}
+    ${o.delivered ? '' : `<p class="small muted" style="font-size:.76rem" data-demo-note>${esc(t('booking.demoNote'))}</p>`}
   </div>`;
 }

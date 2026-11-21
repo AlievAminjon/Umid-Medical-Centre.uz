@@ -471,7 +471,7 @@ export default {
       close: 'Yopish',
       labels: { name: 'Ism', phone: 'Telefon', service: 'Xizmat', when: 'Qachon' }
     },
-    demoNote: 'Shakl namoyish rejimida ishlaydi: ariza brauzerda saqlanadi. CRM yoki klinika pochtasiga ulash sayt ishga tushirilganda amalga oshiriladi.',
+    demoNote: 'Shakl namoyish rejimida ishlaydi: ariza klinikaga avtomatik yuborilmadi va hech qayerda saqlanmaydi. Administrator uni olishi uchun arizani Telegram yoki WhatsApp orqali takrorlang.',
     waMessage: 'Assalomu alaykum! Qabulga yozilmoqchiman.'
   },
 

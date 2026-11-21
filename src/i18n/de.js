@@ -471,7 +471,7 @@ export default {
       close: 'Schließen',
       labels: { name: 'Name', phone: 'Telefon', service: 'Leistung', when: 'Wann' }
     },
-    demoNote: 'Das Formular läuft im Demomodus: Die Anfrage wird im Browser gespeichert. Die Anbindung an CRM oder E-Mail der Klinik erfolgt beim Start.',
+    demoNote: 'Das Formular läuft im Demomodus: Die Anfrage wurde nicht automatisch an die Klinik übermittelt und wird nirgends gespeichert. Damit die Rezeption sie erhält, senden Sie sie bitte per Telegram oder WhatsApp.',
     waMessage: 'Guten Tag! Ich möchte einen Termin vereinbaren.'
   },
 

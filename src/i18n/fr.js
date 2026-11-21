@@ -471,7 +471,7 @@ export default {
       close: 'Fermer',
       labels: { name: 'Prénom', phone: 'Téléphone', service: 'Soin', when: 'Quand' }
     },
-    demoNote: 'Le formulaire fonctionne en mode démonstration : la demande est enregistrée dans votre navigateur. La connexion au CRM ou à la messagerie de la clinique se fait au lancement.',
+    demoNote: 'Le formulaire fonctionne en mode démonstration : la demande n’a pas été transmise automatiquement à la clinique et n’est enregistrée nulle part. Pour que le secrétariat la reçoive, envoyez-la par Telegram ou WhatsApp.',
     waMessage: 'Bonjour ! Je souhaite prendre rendez-vous.'
   },
 

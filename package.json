@@ -5,7 +5,7 @@
   "type": "module",
   "description": "UMID Medical Centre — сайт стоматологической клиники (UMID Signature)",
   "scripts": {
-    "dev": "serve dist",
+    "dev": "node dev-server.mjs",
     "build": "node build.mjs",
     "qa": "node qa.mjs",
     "all": "node build.mjs && node qa.mjs"

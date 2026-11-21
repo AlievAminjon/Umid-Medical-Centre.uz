@@ -29,6 +29,7 @@ export function detectLang() {
 
 function safeGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 export function safeSet(k, v) { try { localStorage.setItem(k, v); } catch { /* приватный режим */ } }
+export function safeRemove(k) { try { localStorage.removeItem(k); } catch { /* приватный режим */ } }
 
 /** t('home.hero.title') — достаёт строку из словаря активного языка.
  *  Если ключа нет — падает на русский (язык по умолчанию), а не на пустоту. */
@@ -60,31 +61,75 @@ export function priceFrom(v) {
   return n ? `${t('common.from')} ${n} ${t('common.currency')}` : null;
 }
 
-/* ---------------- Router ---------------- */
+/* ---------------- Router ----------------
+   Адрес страницы — настоящий путь: /ru, /ru/services, /ru/services/therapy.
+   Без завершающего слеша — так же, как его отдаёт сервер (trailingSlash: false
+   в vercel.json). По http(s) переходы идут через History API.
+
+   Запасной вариант — хеш (#/ru/services). Он включается, когда сайт открыт
+   с диска двойным кликом (file://) или лежит не в корне домена: там
+   серверных путей нет, и обычные ссылки вели бы в никуда. */
 export const PAGES = ['home', 'about', 'services', 'prices', 'doctors', 'reviews', 'patients', 'contacts', 'privacy', 'terms'];
 
-/** Ссылка вида #/ru/services/therapy */
-export function href(page, slug) {
-  const l = state.lang;
-  if (page === 'home' || !page) return `#/${l}/`;
-  return `#/${l}/${page}${slug ? '/' + slug : ''}`;
-}
-export function hrefLang(code, route = state.route) {
-  if (route.page === 'home') return `#/${code}/`;
-  return `#/${code}/${route.page}${route.slug ? '/' + route.slug : ''}`;
+/** Путь маршрута без домена: /ru, /ru/services/therapy. Один источник
+ *  для ссылок, canonical, hreflang и sitemap.xml. */
+export function routePath(lang, page, slug) {
+  if (!page || page === 'home') return `/${lang}`;
+  return `/${lang}/${page}${slug ? '/' + slug : ''}`;
 }
 
-export function parseHash(hash) {
-  const raw = String(hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
+/** Путь текущего маршрута на нужном языке. Для 404 сохраняется исходный адрес. */
+const pathFor = (lang, route) => (route.page === '404' && route.rest
+  ? `/${lang}/${route.rest}`
+  : routePath(lang, route.page, route.slug));
+
+/** Полный адрес страницы для canonical, hreflang, og:url и sitemap. */
+export const absUrl = (lang, route) => SITE_URL + pathFor(lang, route);
+
+let pathMode = null;
+/** true — роутинг по путям (History API), false — хеш-режим. Решается один раз. */
+export function usePaths() {
+  if (pathMode === null) {
+    const { protocol, pathname } = window.location;
+    const first = pathname.split('/').filter(Boolean)[0] || '';
+    pathMode = /^https?:$/.test(protocol) && (first === '' || first === 'index.html' || isLang(first));
+  }
+  return pathMode;
+}
+
+/** Путь → значение для href: в хеш-режиме перед ним ставится «#». */
+export const toHref = (path) => (usePaths() ? path : '#' + path);
+
+/** Ссылка на страницу на текущем языке: /ru/services/therapy */
+export const href = (page, slug) => toHref(routePath(state.lang, page, slug));
+/** Та же страница на другом языке */
+export const hrefLang = (code, route = state.route) => toHref(pathFor(code, route));
+
+/** Файл из dist/assets: от корня сайта в режиме путей, иначе относительно HTML. */
+export const assetUrl = (p) => {
+  const rel = String(p).replace(/^\/+/, '');
+  return usePaths() ? '/' + rel : rel;
+};
+
+/**
+ * Разбор адреса. Принимает и путь (/ru/services), и хеш (#/ru/services) —
+ * второй нужен для хеш-режима и для старых ссылок вида /#/ru/services.
+ * rest — всё, что идёт после языка: по нему достраивается адрес без языка.
+ */
+export function parseRoute(input) {
+  const raw = String(input || '').replace(/^#/, '').split(/[?#]/)[0];
   const parts = raw.split('/').filter(Boolean);
+  if (parts[parts.length - 1] === 'index.html') parts.pop();
   let lang = null, page = 'home', slug = null;
   if (parts.length && isLang(parts[0])) { lang = parts[0]; parts.shift(); }
+  const rest = parts.join('/');
   if (parts.length) page = parts[0];
   if (parts.length > 1) slug = parts[1];
-  if (!PAGES.includes(page)) page = '404';
+  if (!PAGES.includes(page) || parts.length > 2) page = '404';
   if (page === 'services' && slug && !SERVICES.some((s) => s.slug === slug)) page = '404';
   if (page === 'doctors' && slug && !DOCTORS.some((d) => d.slug === slug)) page = '404';
-  return { lang, page, slug };
+  if (slug && !['services', 'doctors'].includes(page)) page = '404';
+  return { lang, page, slug, rest };
 }
 
 /* ---------------- SEO ---------------- */
@@ -132,18 +177,18 @@ export function applySeo(route) {
   meta('property', 'og:type', 'website');
   meta('property', 'og:site_name', CLINIC.name);
   meta('property', 'og:locale', lm.htmlLang);
-  meta('property', 'og:url', SITE_URL + hrefLang(state.lang).replace('#', ''));
+  meta('property', 'og:url', absUrl(state.lang, route));
   meta('name', 'twitter:card', 'summary_large_image');
   meta('name', 'twitter:title', title);
   meta('name', 'twitter:description', desc);
   meta('name', 'theme-color', '#003882');
-  link('canonical', SITE_URL + hrefLang(state.lang).replace('#', ''));
+  link('canonical', absUrl(state.lang, route));
   /* hreflang для всех шести языков + x-default */
   $$('link[rel="alternate"]').forEach((n) => n.remove());
   [...LANGS.map((l) => [l.htmlLang, l.code]), ['x-default', DEFAULT_LANG]].forEach(([hl, code]) => {
     const el = document.createElement('link');
     el.rel = 'alternate'; el.setAttribute('hreflang', hl);
-    el.href = SITE_URL + hrefLang(code, route).replace('#', '');
+    el.href = absUrl(code, route);
     document.head.appendChild(el);
   });
   injectJsonLd(route);
@@ -190,8 +235,8 @@ function injectJsonLd(route) {
       '@context': 'https://schema.org',
       '@type': 'BreadcrumbList',
       itemListElement: [
-        { '@type': 'ListItem', position: 1, name: t('nav.home'), item: SITE_URL + `/${state.lang}/` },
-        { '@type': 'ListItem', position: 2, name: route.page === '404' ? t('notFound.title') : t(`nav.${route.page}`), item: SITE_URL + hrefLang(state.lang, route).replace('#', '') }
+        { '@type': 'ListItem', position: 1, name: t('nav.home'), item: absUrl(state.lang, { page: 'home' }) },
+        { '@type': 'ListItem', position: 2, name: route.page === '404' ? t('notFound.title') : t(`nav.${route.page}`), item: absUrl(state.lang, route) }
       ]
     });
   }

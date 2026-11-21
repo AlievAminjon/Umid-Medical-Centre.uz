@@ -1,9 +1,15 @@
 /* ============================================================
    Сборка: модули + стили + логотипы → dist/index.html (один файл)
+   плюс dist/robots.txt, dist/sitemap.xml и ролики в dist/assets/videos
    ============================================================ */
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, copyFileSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, copyFileSync, statSync, unlinkSync } from 'node:fs';
 import { join, dirname, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+/* Маршруты и адреса берём из тех же модулей, что и сайт: sitemap.xml
+   совпадает с canonical/hreflang по построению. */
+import { LANGS as LANG_LIST, DEFAULT_LANG, SITE_URL, SERVICES, DOCTORS } from './src/data/clinic.js';
+import { PAGES, routePath } from './src/lib/core.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(root, p), 'utf8');
@@ -128,15 +134,25 @@ async function collectPhotos() {
    Видео клиники: src/assets/videos/*.mp4 → assets/videos/ рядом с HTML.
    Ролики намеренно НЕ кодируются в base64 — иначе один HTML-файл
    вырос бы на десятки мегабайт и перестал открываться. В бандл
-   попадает только манифест с относительными путями и постерами.
+   попадает только манифест: путь assets/videos/<файл> и постер.
+   На сайте путь превращается в /assets/videos/… (от корня), а при
+   открытии файла с диска остаётся относительным — см. assetUrl().
+
+   video-1.mobile.mp4 рядом с video-1.mp4 — облегчённая версия того же
+   ролика для телефонов и миниатюр. Отдельным роликом она не считается.
+
+   В имя копии добавляется хеш содержимого (video-1.3f9a1c2e.mp4):
+   ролики отдаются с Cache-Control immutable на год, и без хеша
+   заменённый файл посетители увидели бы только через год.
    ============================================================ */
 const VIDEO_DIR = 'src/assets/videos';
 const VIDEO_OUT = 'assets/videos';                 /* относительно каждого HTML */
 const VIDEO_EXT = /\.(mp4|webm|m4v)$/i;
+const MOBILE_RE = /\.mobile\.(mp4|webm|m4v)$/i;
 const POSTER_EXT = /\.(png|jpe?g|webp|avif)$/i;
 const VIDEO_MIME = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm' };
 const POSTER_MAX_WIDTH = 900;
-const VIDEO_WARN_SIZE = 24 * 1024 * 1024;
+const VIDEO_WARN_SIZE = 8 * 1024 * 1024;
 
 /** Кадр-постер рядом с роликом: video-1.mp4 → video-1.jpg */
 async function posterFor(dir, files, key) {
@@ -152,37 +168,55 @@ async function collectVideos() {
   const dir = join(root, VIDEO_DIR);
   if (!existsSync(dir)) return { list: [], report: ['  videos: папки ' + VIDEO_DIR + ' нет — первый экран покажет фотографию'] };
   const files = readdirSync(dir);
-  const clips = files.filter((f) => VIDEO_EXT.test(f)).sort();
+  const clips = files.filter((f) => VIDEO_EXT.test(f) && !MOBILE_RE.test(f)).sort();
   const list = [];
   const report = [];
+  const heavy = (n) => (n > VIDEO_WARN_SIZE ? '  ← тяжёлый файл, стоит пережать (см. src/assets/videos/README.md)' : '');
+  /** video-1.mp4 → video-1.<хеш>.mp4 */
+  const hashed = (file) => {
+    const ext = file.slice(file.lastIndexOf('.'));
+    const hash = createHash('sha1').update(readFileSync(join(dir, file))).digest('hex').slice(0, 8);
+    return `${file.slice(0, -ext.length)}.${hash}${ext}`;
+  };
   for (const file of clips) {
     const key = file.replace(VIDEO_EXT, '');
     const size = statSync(join(dir, file)).size;
     const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
+    const mobileFile = files.find((f) => MOBILE_RE.test(f) && f.replace(MOBILE_RE, '') === key);
+    const out = hashed(file);
+    const mobileOut = mobileFile ? hashed(mobileFile) : null;
     list.push({
       key,
-      file,
-      src: `${VIDEO_OUT}/${file}`,
+      copies: [[file, out], ...(mobileFile ? [[mobileFile, mobileOut]] : [])],
+      src: `${VIDEO_OUT}/${out}`,
       type: VIDEO_MIME[ext] || 'video/mp4',
-      poster: await posterFor(dir, files, key)
+      poster: await posterFor(dir, files, key),
+      mobile: mobileOut ? `${VIDEO_OUT}/${mobileOut}` : null
     });
-    report.push(`  video ${key}: ${kb(size)}${size > VIDEO_WARN_SIZE ? '  ← тяжёлый файл, стоит пережать' : ''}`);
+    report.push(`  video ${key}: ${kb(size)}${heavy(size)}`);
+    if (mobileFile) {
+      const msize = statSync(join(dir, mobileFile)).size;
+      report.push(`  video ${key} (mobile): ${kb(msize)}${heavy(msize)}`);
+    }
   }
   if (!clips.length) report.push('  videos: пока нет — положите mp4 в ' + VIDEO_DIR);
   return { list, report };
 }
 
-/** Копируем ролики рядом с каждой копией сайта — иначе они не проиграются. */
+/** Копируем ролики рядом с каждой копией сайта — иначе они не проиграются.
+ *  Ролики, которых больше нет в src/assets/videos, удаляются из копий. */
 function copyVideos(videos, outputs) {
-  if (!videos.length) return [];
   const done = [];
+  const pairs = videos.flatMap((v) => v.copies);
+  const names = pairs.map(([, out]) => out);
   const dirs = [...new Set(outputs.map((out) => join(dirname(resolve(root, out)), VIDEO_OUT)))];
   for (const outDir of dirs) {
+    if (!names.length && !existsSync(outDir)) continue;
     mkdirSync(outDir, { recursive: true });
-    let copied = 0;
-    for (const v of videos) {
-      const from = join(root, VIDEO_DIR, v.file);
-      const to = join(outDir, v.file);
+    let copied = 0, removed = 0;
+    for (const [name, outName] of pairs) {
+      const from = join(root, VIDEO_DIR, name);
+      const to = join(outDir, outName);
       const src = statSync(from);
       /* Не переписываем файл, если он уже такой же — сборка остаётся быстрой */
       if (existsSync(to)) {
@@ -192,16 +226,72 @@ function copyVideos(videos, outputs) {
       copyFileSync(from, to);
       copied++;
     }
-    done.push(`  videos → ${outDir.split(sep).join('/')} (${copied ? copied + ' обновлено' : 'без изменений'})`);
+    for (const stale of readdirSync(outDir).filter((f) => VIDEO_EXT.test(f) && !names.includes(f))) {
+      unlinkSync(join(outDir, stale));
+      removed++;
+    }
+    const parts = [copied && `${copied} обновлено`, removed && `${removed} удалено`].filter(Boolean);
+    done.push(`  videos → ${outDir.split(sep).join('/')} (${parts.length ? parts.join(', ') : 'без изменений'})`);
   }
   return done;
+}
+
+/* ============================================================
+   robots.txt и sitemap.xml: все страницы × 6 языков, у каждого
+   адреса — альтернативы hreflang (как в <head> на сайте).
+   Адреса строит routePath() из src/lib/core.js — тот же, что
+   для canonical, поэтому расхождений быть не может.
+   ============================================================ */
+function siteRoutes() {
+  return [
+    ...PAGES.map((page) => ({ page, slug: null })),
+    ...SERVICES.map((s) => ({ page: 'services', slug: s.slug })),
+    ...DOCTORS.map((d) => ({ page: 'doctors', slug: d.slug }))
+  ];
+}
+
+const xmlEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]));
+
+function buildSitemap() {
+  const url = (lang, r) => SITE_URL + routePath(lang, r.page, r.slug);
+  const alternates = [...LANG_LIST.map((l) => [l.htmlLang, l.code]), ['x-default', DEFAULT_LANG]];
+  const entries = [];
+  for (const r of siteRoutes()) {
+    for (const l of LANG_LIST) {
+      entries.push([
+        '  <url>',
+        `    <loc>${xmlEsc(url(l.code, r))}</loc>`,
+        ...alternates.map(([hl, code]) => `    <xhtml:link rel="alternate" hreflang="${hl}" href="${xmlEsc(url(code, r))}"/>`),
+        '  </url>'
+      ].join('\n'));
+    }
+  }
+  const xml = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">',
+    ...entries,
+    '</urlset>',
+    ''
+  ].join('\n');
+  return { xml, count: entries.length };
+}
+
+function buildRobots() {
+  return [
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /api/',
+    '',
+    `Sitemap: ${SITE_URL}/sitemap.xml`,
+    ''
+  ].join('\n');
 }
 
 /* ---- Сборка ---- */
 const photos = await collectPhotos();
 const videos = await collectVideos();
 const videoEntries = videos.list
-  .map((v) => `{key:${JSON.stringify(v.key)},src:${JSON.stringify(v.src)},type:${JSON.stringify(v.type)},poster:${JSON.stringify(v.poster)}}`)
+  .map((v) => `{key:${JSON.stringify(v.key)},src:${JSON.stringify(v.src)},mobile:${JSON.stringify(v.mobile)},type:${JSON.stringify(v.type)},poster:${JSON.stringify(v.poster)}}`)
   .join(',');
 const photoEntries = Object.entries(photos.map).map(([k, v]) => `${JSON.stringify(k)}:${JSON.stringify(v)}`).join(',');
 const css = STYLES.map((f) => `/* ${f} */\n${read(f)}`).join('\n');
@@ -221,17 +311,21 @@ let html = read('src/index.template.html')
   .replaceAll('__FAVICON__', () => LOGO_MARK);
 
 /* ---- Куда кладём результат ----
-   Копий сайта три, и они должны быть одинаковыми. Иначе легко
-   пересобрать проект и открыть старый файл, не увидев изменений. */
+   Копий сайта две, и они одинаковые. Обе внутри репозитория:
+   сборка ничего не пишет за его пределы. */
 const OUTPUTS = [
-  'dist/index.html',                 /* результат сборки */
-  'index.html',                      /* рядом с исходниками, чтобы открыть двойным кликом */
-  '../../umid-website.html'          /* копия в корне проекта */
+  'dist/index.html',                 /* результат сборки — его раздаёт Vercel */
+  'index.html'                       /* рядом с исходниками, чтобы открыть двойным кликом (в .gitignore) */
 ];
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 for (const out of OUTPUTS) writeFileSync(join(root, out), html, 'utf8');
 const videoLog = copyVideos(videos.list, OUTPUTS);
+
+/* robots.txt и sitemap.xml нужны только на хостинге — кладём в dist/ */
+const sitemap = buildSitemap();
+writeFileSync(join(root, 'dist/sitemap.xml'), sitemap.xml, 'utf8');
+writeFileSync(join(root, 'dist/robots.txt'), buildRobots(), 'utf8');
 
 console.log('Собрано:', kb(Buffer.byteLength(html)));
 console.log('  css:', kb(Buffer.byteLength(css)), '| js:', kb(Buffer.byteLength(bundle)), '| logos:', kb(LOGO_MARK.length + LOGO_FULL.length));
@@ -239,5 +333,6 @@ photos.report.forEach((l) => console.log(l));
 if (!photos.report.length) console.log('  photos: пока нет — положите файлы в', PHOTO_DIR);
 videos.report.forEach((l) => console.log(l));
 videoLog.forEach((l) => console.log(l));
+console.log(`  sitemap.xml: ${sitemap.count} адресов (${siteRoutes().length} страниц × ${LANG_LIST.length} языков)`);
 console.log('Обновлены файлы:');
-OUTPUTS.forEach((out) => console.log('  ' + join(root, out).split(sep).join('/')));
+[...OUTPUTS, 'dist/robots.txt', 'dist/sitemap.xml'].forEach((out) => console.log('  ' + join(root, out).split(sep).join('/')));

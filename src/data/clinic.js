@@ -15,9 +15,12 @@ export const CLINIC = {
   mapSearch: 'UMID Medical Centre, Bukhara ave 21A, Kogon, Bukhara region, Uzbekistan',
   /* Точная точка на карте появится после подтверждения координат клиникой */
   coords: null,
-  /* Куда отправлять заявку с формы. null → форма работает в демо-режиме
-     и предлагает продублировать заявку в Telegram/WhatsApp. */
-  bookingEndpoint: null,
+  /* Куда отправлять заявку с формы: Vercel-функция api/booking.js пересылает
+     её в Telegram клиники (нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в
+     настройках проекта на Vercel). Если функция не настроена или недоступна,
+     а также при открытии файла с диска форма работает в демо-режиме и
+     предлагает продублировать заявку в Telegram/WhatsApp. null — всегда демо. */
+  bookingEndpoint: '/api/booking',
   currency: 'UZS'
 };
 

@@ -103,6 +103,10 @@
 }
 .toast[data-show="true"]{opacity:1;visibility:visible;transform:translate(-50%,0)}
 
+/* Поле-ловушка для ботов в форме записи: вне экрана, но не display:none —
+   иначе часть ботов его пропускает. */
+.hp{position:absolute!important;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+
 /* -------- Print -------- */
 @media print{
   .header,.bottombar,.floaters,.ctaband,.modal,.toast,.loader,.progress,.mmenu{display:none!important}

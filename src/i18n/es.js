@@ -471,7 +471,7 @@ export default {
       close: 'Cerrar',
       labels: { name: 'Nombre', phone: 'Teléfono', service: 'Servicio', when: 'Cuándo' }
     },
-    demoNote: 'El formulario funciona en modo demostración: la solicitud se guarda en tu navegador. La conexión con el CRM o el correo de la clínica se configura en el lanzamiento.',
+    demoNote: 'El formulario funciona en modo demostración: la solicitud no se ha enviado a la clínica automáticamente y no se guarda en ningún sitio. Para que recepción la reciba, envíala por Telegram o WhatsApp.',
     waMessage: '¡Hola! Me gustaría pedir cita.'
   },
 

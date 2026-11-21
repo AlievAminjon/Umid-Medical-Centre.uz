@@ -5,6 +5,10 @@
   "buildCommand": "echo 'skip: dist собран локально через npm run build'",
   "outputDirectory": "dist",
   "trailingSlash": false,
+  "rewrites": [
+    { "source": "/:lang(ru|uz|en|es|fr|de)", "destination": "/index.html" },
+    { "source": "/:lang(ru|uz|en|es|fr|de)/:path*", "destination": "/index.html" }
+  ],
   "headers": [
     {
       "source": "/assets/videos/(.*)",
