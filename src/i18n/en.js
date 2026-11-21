@@ -471,7 +471,7 @@ export default {
       close: 'Close',
       labels: { name: 'Name', phone: 'Phone', service: 'Service', when: 'When' }
     },
-    demoNote: 'The form runs in demo mode: requests are stored in your browser. Connection to the clinic’s CRM or email is set up at launch.',
+    demoNote: 'The form runs in demo mode: your request was not sent to the clinic automatically and is not stored anywhere. To make sure our receptionist gets it, send it via Telegram or WhatsApp.',
     waMessage: 'Hello! I would like to book an appointment.'
   },
 

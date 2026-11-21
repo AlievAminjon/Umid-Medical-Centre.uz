@@ -1,7 +1,7 @@
 /* ============================================================
    UMID Medical Centre — точка входа
    ============================================================ */
-import { $, $$, on, state, t, detectLang, isLang, parseHash, href, hrefLang, applySeo, safeSet, toast } from './lib/core.js';
+import { $, $$, on, state, detectLang, isLang, parseRoute, usePaths, toHref, hrefLang, applySeo, safeSet, safeRemove } from './lib/core.js';
 import { runPageMotion, initScrollState, hideLoader, prefersReducedMotion } from './lib/motion.js';
 import { header, mobileMenu, footer, bottomBar, floaters } from './components/layout.js';
 import { bookingModal, bookingForm, validate, submitBooking, successView } from './components/booking.js';
@@ -35,7 +35,10 @@ function renderView(route) {
   }
 }
 
+let painted = false;
+
 function paint(route, opts = {}) {
+  painted = true;
   state.route = route;
   $('#header-slot').innerHTML = header(route);
   $('#mmenu-slot').innerHTML = mobileMenu(route);
@@ -65,21 +68,68 @@ function render(route, opts = {}) {
   paint(route, opts);
 }
 
-/* ---------------- Роутинг ---------------- */
+/* ---------------- Роутинг ----------------
+   По http(s): адрес — путь (/ru/services), переходы через History API.
+   С диска (file://): адрес — хеш (#/ru/services), как раньше.
+   Правила выбора режима — usePaths() в lib/core.js. */
+const currentAddress = () => (usePaths() ? location.pathname : location.hash);
+
+/** Хеш вида #/ru/services — маршрут. Хеш вида #view — обычный якорь. */
+const isRouteHash = (h) => /^#\//.test(h);
+
+/**
+ * Старые ссылки /#/ru/services (сайт раньше работал только на хешах)
+ * переводим на путь /ru/services. Сервер хеш не видит, поэтому это
+ * делается здесь, через replaceState — без лишней записи в истории.
+ */
+function upgradeLegacyHash() {
+  if (!usePaths() || !isRouteHash(location.hash)) return false;
+  const parts = location.hash.slice(1).split(/[?#]/)[0].split('/').filter(Boolean);
+  history.replaceState(null, '', '/' + parts.join('/') + location.search);
+  return true;
+}
+
 function route() {
-  const parsed = parseHash(location.hash);
+  upgradeLegacyHash();
+  /* В хеш-режиме якорь вроде #view (ссылка «к содержимому») — не маршрут:
+     страницу не трогаем, а если открыли сразу с ним — показываем главную. */
+  const anchorOnly = !usePaths() && location.hash && !isRouteHash(location.hash);
+  if (anchorOnly && painted) return;
+  const parsed = parseRoute(anchorOnly ? '' : currentAddress());
   /* Язык всегда присутствует в адресе — так ссылкой можно поделиться. */
   if (!parsed.lang) {
     const lang = detectLang();
     state.lang = lang;
-    location.replace(`#/${lang}/${parsed.page === 'home' ? '' : parsed.page + (parsed.slug ? '/' + parsed.slug : '')}`);
+    const target = `/${lang}${parsed.rest ? '/' + parsed.rest : ''}`;
+    if (usePaths()) history.replaceState(null, '', target + location.search);
+    else { location.replace(toHref(target)); return; }
+    route();
     return;
   }
   if (parsed.lang !== state.lang) {
     state.lang = parsed.lang;
     safeSet('umid.lang', parsed.lang);
   }
-  render({ page: parsed.page, slug: parsed.slug });
+  render({ page: parsed.page, slug: parsed.slug, rest: parsed.rest });
+}
+
+/** Переход на адрес из href(): путь в режиме History API, хеш — иначе. */
+function navigate(url) {
+  if (!usePaths()) { location.hash = url.replace(/^#/, ''); return; }
+  if (url === location.pathname) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  history.pushState(null, '', url);
+  route();
+}
+
+/** Клики по внутренним ссылкам (/ru/...) обрабатываем без перезагрузки страницы. */
+function interceptLinks(e) {
+  if (!usePaths() || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a || (a.target && a.target !== '_self') || a.hasAttribute('download')) return;
+  const url = a.getAttribute('href');
+  if (!/^\/(?!\/)/.test(url) || !parseRoute(url).lang) return;
+  e.preventDefault();
+  navigate(url.split('#')[0]);
 }
 
 /* ---------------- Мобильное меню ---------------- */
@@ -146,22 +196,20 @@ async function handleSubmit(e, form) {
     date: f.date.value,
     time: f.time.value,
     comment: f.comment.value.trim(),
+    consent: f.consent.checked,
+    website: f.website ? f.website.value : '',   /* ловушка для ботов, у людей пустая */
     lang: state.lang
   };
   const inline = form.id !== 'booking-form';
-  try {
-    await submitBooking(data);
-    if (inline) {
-      const card = form.closest('.bookcard');
-      if (card) card.innerHTML = successView(data, { inline: true });
-    } else {
-      $('#booking-content').innerHTML = successView(data);
-      $('#booking .modal__box').scrollTop = 0;
-    }
-  } catch (err) {
-    submitBtn.classList.remove('btn--loading');
-    toast(t('booking.errors.phone'));
-    console.error(err);
+  /* Не доставили (функция не настроена или недоступна) — показываем
+     демо-сценарий: экран успеха с просьбой продублировать заявку в мессенджер. */
+  const { delivered } = await submitBooking(data);
+  if (inline) {
+    const card = form.closest('.bookcard');
+    if (card) card.innerHTML = successView(data, { inline: true, delivered });
+  } else {
+    $('#booking-content').innerHTML = successView(data, { delivered });
+    $('#booking .modal__box').scrollTop = 0;
   }
 }
 
@@ -212,11 +260,17 @@ function filterPrices() {
 
 /* ---------------- Инициализация ---------------- */
 function init() {
-  const first = parseHash(location.hash);
+  upgradeLegacyHash();
+  const first = parseRoute(currentAddress());
   state.lang = isLang(first.lang) ? first.lang : detectLang();
   $('#modal-slot').innerHTML = bookingModal();
+  /* Прежняя версия формы складывала заявки (имя и телефон) в localStorage.
+     Больше этого не делаем — и убираем то, что могло остаться. */
+  safeRemove('umid.requests');
 
-  window.addEventListener('hashchange', route);
+  /* hashchange нужен и в режиме путей: так ловим вставленную старую ссылку #/ru/... */
+  window.addEventListener('hashchange', () => { if (usePaths() && !isRouteHash(location.hash)) return; route(); });
+  window.addEventListener('popstate', () => { if (usePaths()) route(); });
   route();
   hideLoader();
   initScrollState();
@@ -247,7 +301,7 @@ function init() {
     if (!isLang(code) || code === state.lang) { closeLangMenus(); return; }
     safeSet('umid.lang', code);
     closeLangMenus();
-    location.hash = hrefLang(code, state.route).replace(/^#/, '');
+    navigate(hrefLang(code, state.route));
   });
 
   /* Выпадающий список языков */
@@ -270,6 +324,10 @@ function init() {
     const field = e.target.closest?.('.field');
     if (field && field.dataset.invalid === 'true') field.dataset.invalid = 'false';
   });
+
+  /* Внутренние ссылки — последним обработчиком кликов: data-lang, data-book
+     и прочие уже успели отменить переход, если он им не нужен. */
+  document.addEventListener('click', interceptLinks);
 
   /* Клавиатура */
   document.addEventListener('keydown', (e) => {

@@ -4,7 +4,7 @@
    вся сцена живёт в лёгком 3D-параллаксе от курсора.
    ============================================================ */
 import { icon, iconFilled } from '../lib/icons.js';
-import { esc, t, tl } from '../lib/core.js';
+import { esc, t, tl, assetUrl } from '../lib/core.js';
 import { CLINIC } from '../data/clinic.js';
 import { VIDEOS } from '../lib/assets.js';
 import { btn, bookBtn, frame, liveChip, maskLine } from '../components/ui.js';
@@ -30,18 +30,23 @@ function heroFloat(key, ic, mod, depth) {
 /** Ролики, доступные сборке. Пусто → первый экран покажет фотографию. */
 const clips = () => (Array.isArray(VIDEOS) ? VIDEOS : []);
 
+/* Разметка роликов приходит без src: сначала виден только постер,
+   а сами файлы подключает initHeroVideo — когда первый экран в кадре
+   и страница уже загрузилась. */
+
 /** Один слот проигрывателя. Их два — чтобы смена шла перекрытием, без вспышки. */
 function videoSlot(clip, i) {
   return `<video class="vplayer__video${i === 0 ? ' is-active' : ''}" data-vslot="${i}"
-    ${clip ? `src="${esc(clip.src)}"` : ''} ${clip && clip.poster ? `poster="${clip.poster}"` : ''}
-    muted loop playsinline preload="${i === 0 ? 'auto' : 'none'}"
+    ${clip && clip.poster ? `poster="${clip.poster}"` : ''}
+    muted loop playsinline preload="none"
     tabindex="-1" aria-hidden="true"></video>`;
 }
 
+/** Миниатюра i показывает ролик i + 1 (нулевой — на главном экране). */
 function videoThumb(clip, i, label) {
   return `<button class="vthumb" type="button" data-vthumb="${i}" aria-label="${esc(label)}">
     <span class="vthumb__media">
-      <video muted loop playsinline preload="metadata" src="${esc(clip.src)}"
+      <video muted loop playsinline preload="none" data-clip="${i + 1}"
         ${clip.poster ? `poster="${clip.poster}"` : ''} tabindex="-1" aria-hidden="true"></video>
       <span class="vthumb__veil"></span>
     </span>
@@ -169,6 +174,34 @@ let videoCleanup = null;
 const reducedMotion = () =>
   typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** Пользователь просит экономить трафик (Save-Data) или сеть совсем медленная. */
+const saveData = () => {
+  const c = typeof navigator !== 'undefined' && navigator.connection;
+  return !!(c && (c.saveData || /2g$/.test(c.effectiveType || '')));
+};
+
+const smallScreen = () =>
+  typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches;
+
+/** Адрес файла: облегчённая версия (если сборка её нашла) — для телефонов и миниатюр. */
+const clipSrc = (clip, small = smallScreen()) => assetUrl(small && clip.mobile ? clip.mobile : clip.src);
+
+/** Подключить ролик к <video>, если он ещё не подключён. */
+function attach(video, clip, { small, preload = 'metadata' } = {}) {
+  const src = clipSrc(clip, small);
+  if (video.getAttribute('src') !== src) video.setAttribute('src', src);
+  video.preload = preload;
+}
+
+/** После загрузки страницы и в свободную минуту — чтобы ролик не спорил с первой отрисовкой. */
+function whenSettled(fn) {
+  const idle = () => (typeof window.requestIdleCallback === 'function'
+    ? window.requestIdleCallback(fn, { timeout: 1500 })
+    : setTimeout(fn, 200));
+  if (document.readyState === 'complete') idle();
+  else window.addEventListener('load', idle, { once: true });
+}
+
 export function initHeroVideo(root = document) {
   if (videoCleanup) { videoCleanup(); videoCleanup = null; }
 
@@ -185,7 +218,13 @@ export function initHeroVideo(root = document) {
   /* order[0] — главный ролик, дальше по миниатюрам слева направо */
   const order = list.map((_, i) => i);
   let active = 0;              /* какой из двух слотов сейчас на экране */
-  let wantPlay = !reducedMotion();
+  /* Save-Data и prefers-reduced-motion: сами ничего не качаем и не играем —
+     остаётся постер. Кнопка Play и миниатюры по-прежнему работают. */
+  const dataSaver = saveData();
+  let wantPlay = !reducedMotion() && !dataSaver;
+  let primed = false;          /* ролики уже подключены к <video> */
+  let inView = !('IntersectionObserver' in window);
+  let disposed = false;
   let busy = false;
   let timers = [];
 
@@ -214,10 +253,9 @@ export function initHeroVideo(root = document) {
     const clip = list[clipIndex];
     busy = true;
 
-    next.src = clip.src;
+    attach(next, clip, { preload: 'auto' });
     if (clip.poster) next.setAttribute('poster', clip.poster); else next.removeAttribute('poster');
     next.currentTime = 0;
-    next.preload = 'auto';
     next.load();
 
     const show = () => {
@@ -235,20 +273,49 @@ export function initHeroVideo(root = document) {
     later(show, 900);
   }
 
+  /** Миниатюре нужен сам файл, а не только постер? */
+  const thumbNeedsFile = (clip, hadFile) => primed && (wantPlay || hadFile || (!dataSaver && !clip.poster));
+
   /** Перерисовка миниатюр под текущий порядок — без перестановки самих кнопок. */
   function paintThumbs() {
     thumbs.forEach((btnEl, i) => {
       const clip = list[order[i + 1]];
       if (!clip) return;
       const v = btnEl.querySelector('video');
-      if (!v || v.getAttribute('src') === clip.src) return;
+      if (!v || v.dataset.clip === String(order[i + 1])) return;
       btnEl.classList.add('is-swapping');
       later(() => {
-        v.setAttribute('src', clip.src);
+        const hadFile = v.hasAttribute('src');
+        v.dataset.clip = String(order[i + 1]);
         if (clip.poster) v.setAttribute('poster', clip.poster); else v.removeAttribute('poster');
-        v.load();
+        if (thumbNeedsFile(clip, hadFile)) { attach(v, clip, { small: true }); v.load(); }
+        else if (hadFile) { v.removeAttribute('src'); v.load(); }
         btnEl.classList.remove('is-swapping');
       }, 200);
+    });
+  }
+
+  /**
+   * Первый экран в кадре и страница загружена — подключаем ролики.
+   * Обычно: главный ролик целиком + миниатюры (метаданные и первый кадр).
+   * Save-Data / reduced motion: только кадры для роликов без постера
+   * (при Save-Data — вообще ничего).
+   */
+  function prime() {
+    if (primed || disposed) return;
+    primed = true;
+    const main = current();
+    const mainClip = list[order[0]];
+    if (wantPlay) {
+      attach(main, mainClip, { preload: 'auto' });
+      /* Пока ждали загрузки, сцену могли прокрутить — тогда стартуем при возвращении */
+      if (inView) tryPlay(main);
+    }
+    else if (!dataSaver && !mainClip.poster) attach(main, mainClip);
+    thumbs.forEach((btnEl, i) => {
+      const clip = list[order[i + 1]];
+      const v = btnEl.querySelector('video');
+      if (clip && v && thumbNeedsFile(clip, false)) attach(v, clip, { small: true });
     });
   }
 
@@ -264,8 +331,12 @@ export function initHeroVideo(root = document) {
   /* --- События --- */
   const onToggle = () => {
     const v = current();
-    if (v.paused) { wantPlay = true; tryPlay(v); }
-    else { wantPlay = false; v.pause(); setState(false); }
+    if (v.paused) {
+      wantPlay = true;
+      /* Явное нажатие Play загружает ролик даже при Save-Data */
+      if (!v.hasAttribute('src')) attach(v, list[order[0]], { preload: 'auto' });
+      tryPlay(v);
+    } else { wantPlay = false; v.pause(); setState(false); }
   };
   if (toggle) toggle.addEventListener('click', onToggle);
 
@@ -279,32 +350,50 @@ export function initHeroVideo(root = document) {
   /* Наведение оживляет миниатюру — но только там, где есть настоящий курсор */
   const hoverable = typeof window.matchMedia === 'function'
     && window.matchMedia('(hover: hover) and (pointer: fine)').matches && !reducedMotion();
-  const hoverIn = (e) => { const v = e.currentTarget.querySelector('video'); if (v) { const p = v.play(); if (p && p.catch) p.catch(() => {}); } };
+  const hoverIn = (e) => {
+    const v = e.currentTarget.querySelector('video');
+    if (!v) return;
+    if (!v.hasAttribute('src')) {
+      const clip = list[Number(v.dataset.clip)];
+      if (dataSaver || !clip) return;
+      attach(v, clip, { small: true });
+    }
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {});
+  };
   const hoverOut = (e) => { const v = e.currentTarget.querySelector('video'); if (v) { v.pause(); v.currentTime = 0; } };
   if (hoverable) thumbs.forEach((b) => { b.addEventListener('pointerenter', hoverIn); b.addEventListener('pointerleave', hoverOut); });
 
-  /* Ушли со сцены — гасим воспроизведение, чтобы не греть страницу зря */
+  /* Сцена в кадре — подключаем ролики (один раз) и продолжаем воспроизведение.
+     Ушли со сцены — гасим, чтобы не греть страницу зря. */
   let io = null;
   if ('IntersectionObserver' in window) {
     io = new IntersectionObserver((entries) => {
       entries.forEach((en) => {
         const v = current();
-        if (en.isIntersecting) { if (wantPlay && v.paused) tryPlay(v); }
-        else if (!v.paused) { v.pause(); setState(false); }
+        inView = en.isIntersecting;
+        if (en.isIntersecting) {
+          if (!primed) whenSettled(prime);
+          else if (wantPlay && v.paused) tryPlay(v);
+        } else if (!v.paused) { v.pause(); setState(false); }
       });
     }, { threshold: 0.12 });
     io.observe(player);
+  } else {
+    whenSettled(prime);
   }
 
-  /* Первый ролик стартует сам; если браузер не даст — останется первый кадр */
+  /* Первый ролик стартует сам, когда сцена в кадре; если браузер
+     не даст автоплей — останется постер или первый кадр */
   const first = slots[0];
-  if (wantPlay) tryPlay(first); else setState(false);
+  setState(false);
   first.addEventListener('play', () => setState(true));
   first.addEventListener('pause', () => { if (!busy) setState(false); });
   slots[1].addEventListener('play', () => setState(true));
   slots[1].addEventListener('pause', () => { if (!busy) setState(false); });
 
   videoCleanup = () => {
+    disposed = true;
     timers.forEach(clearTimeout);
     timers = [];
     if (toggle) toggle.removeEventListener('click', onToggle);

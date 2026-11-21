@@ -1,8 +1,11 @@
-# В деплой уходит только dist/ — всё остальное нужно лишь для локальной сборки.
+# В деплой уходят dist/ (сайт) и api/ (функция заявок) — всё остальное нужно
+# лишь для локальной сборки. api/ и package.json исключать нельзя: без них
+# не будет функции /api/booking ("type": "module" нужен для её запуска).
 node_modules
 src
 build.mjs
 qa.mjs
+dev-server.mjs
 package-lock.json
 README.md
 
